@@ -75,6 +75,57 @@ async function upMsg(x){ await q(`insert into messages(dialog_id,message_id,side
 function rowMsg(r){return{id:String(r.message_id||''),message_id:r.message_id,side:r.side,from_id:r.from_id,author:r.author||'unknown',author_full:r.author_full||r.author||'unknown',to_id:r.to_id,to:r.to_name,text:r.text||'',plain:r.plain||'',date:r.date_ts?Number(r.date_ts):null,timeText:r.time_text||'',edited:!!r.edited,edit_date:r.edit_date?Number(r.edit_date):null,old_text:r.old_text||'',deleted:!!r.deleted,media:r.media||null,reply:r.reply||null,raw_type:r.raw_type||'text',saved_at:r.saved_at?Number(r.saved_at):null}}
 async function getMsg(dialogId,messageId){ const r=await q('select * from messages where dialog_id=$1 and message_id=$2',[dialogId,String(messageId)]); return r.rows[0]?rowMsg(r.rows[0]):null }
 
+function oneTimeTtl(msg){
+  const direct=[
+    msg?.ttl_seconds,
+    msg?.media?.ttl_seconds,
+    msg?.photo?.ttl_seconds,
+    msg?.video?.ttl_seconds,
+    msg?.video_note?.ttl_seconds,
+    msg?.document?.ttl_seconds,
+    msg?.animation?.ttl_seconds,
+    msg?.ephemeral_message_parameters?.ttl_seconds,
+    msg?.self_destruct?.ttl_seconds,
+    msg?.self_destruct_type?.ttl_seconds
+  ];
+  for(const v of direct){
+    const n=Number(v);
+    if(Number.isFinite(n)&&n>0)return n;
+  }
+  // Telegram Business/Bot API versions may place ttl_seconds deeper in the payload.
+  // Scan only keys that explicitly refer to TTL/self-destruct; do NOT use ttl_period
+  // because that is the chat/message auto-delete timer, not one-time media.
+  const seen=new Set();
+  function walk(v,depth=0){
+    if(!v||typeof v!=='object'||depth>5||seen.has(v))return 0;
+    seen.add(v);
+    for(const [k,val] of Object.entries(v)){
+      const key=String(k).toLowerCase();
+      if(key==='ttl_seconds'){
+        const n=Number(val); if(Number.isFinite(n)&&n>0)return n;
+      }
+      if((key.includes('self_destruct')||key.includes('selfdestruct')||key.includes('ephemeral'))&&typeof val==='number'){
+        const n=Number(val); if(Number.isFinite(n)&&n>0)return n;
+      }
+      if(val&&typeof val==='object'){
+        const r=walk(val,depth+1); if(r>0)return r;
+      }
+    }
+    return 0;
+  }
+  return walk(msg);
+}
+function isKnownOneTime(msg,saved,media){
+  return Boolean(
+    oneTimeTtl(msg)>0 ||
+    media?.is_one_time ||
+    media?.original_file_id ||
+    media?.original_type ||
+    String(media?.label||'').toLowerCase().includes('однораз') ||
+    String(saved?.plain||'').toLowerCase().includes('однораз')
+  );
+}
+
 async function restoreRepliedMedia(m){
   try{
     const reply=m.reply_to_message;
@@ -107,14 +158,10 @@ async function restoreRepliedMedia(m){
     const allowed=['photo','video','video_note','document'];
     if(!allowed.includes(media.type))return;
 
-    const isOneTime=Boolean(
-      reply.ttl_seconds ||
-      media.original_file_id ||
-      media.original_type ||
-      String(media.label||'').toLowerCase().includes('однораз') ||
-      String(saved?.plain||'').toLowerCase().includes('однораз')
-    );
-    if(!isOneTime)return;
+    // IMPORTANT: do not stop here when Telegram doesn't expose the one-time flag.
+    // The previous working version restored replied media without this strict filter.
+    // We still detect the flag for nicer wording, but media recovery must continue.
+    const knownOneTime=isKnownOneTime(reply,saved,media);
 
     const target=m.from?.id;
     if(!target)return;
@@ -124,9 +171,9 @@ async function restoreRepliedMedia(m){
     const originalId=saved?.message_id || reply.message_id;
 
     const caption=
-      `🔄 <b>Одноразовое медиа восстановлено</b>\n`+
+      `🔄 <b>${knownOneTime?'Одноразовое медиа восстановлено':'Восстановленное медиа'}</b>\n`+
       `${line()}\n`+
-      `Ты ответил на одноразовое фото/видео. Бот сохранил копию и попытался отправить её тебе.\n\n`+
+      `${knownOneTime?'Ты ответил на одноразовое фото/видео. Бот сохранил копию и попытался отправить её тебе.':'Ты ответил на медиа-сообщение. Если оно было одноразовым, бот использует сохранённую копию.'}\n\n`+
       `📎 <b>${esc(media.label||'Медиа')}</b>\n`+
       `🧾 Media ID: <code>${esc(originalId||'')}</code>\n`+
       `👤 От: ${esc(originalAuthor)}\n`+
@@ -218,7 +265,8 @@ async function uploadMediaAsDocument(chatId,media,caption=''){
 async function cacheSelfDestructMediaIfNeeded(msg,stored){
   try{
     if(!stored?.media?.file_id)return stored;
-    if(!msg.ttl_seconds)return stored;
+    const ttl=oneTimeTtl(msg);
+    if(!ttl)return stored;
     if(!['photo','video','video_note'].includes(stored.media.type))return stored;
     if(!OWNER_ID)return stored;
 
@@ -226,7 +274,7 @@ async function cacheSelfDestructMediaIfNeeded(msg,stored){
       `💾 <b>Кэш одноразового медиа</b>\n`+
       `Media ID: <code>${esc(stored.message_id||stored.id||msg.message_id||'')}</code>\n`+
       `Тип: ${esc(stored.media.label||stored.media.type)}\n`+
-      `TTL: <code>${esc(msg.ttl_seconds)}</code> сек.`;
+      `TTL: <code>${esc(ttl)}</code> сек.`;
 
     const uploaded=await uploadMediaAsDocument(OWNER_ID,stored.media,cap);
 
@@ -235,6 +283,8 @@ async function cacheSelfDestructMediaIfNeeded(msg,stored){
         ...stored.media,
         original_type:stored.media.type,
         original_file_id:stored.media.file_id,
+        is_one_time:true,
+        ttl_seconds:ttl,
         type:'document',
         label:'Одноразовое медиа',
         file_id:uploaded.result.document.file_id,
