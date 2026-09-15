@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: frodrobot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: SECRET_TOKEN
+        sync: false
+      - key: VIEWER_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: MAX_MESSAGES_PER_DIALOG
+        value: 3000
+      - key: REPORT_MESSAGES
+        value: 1

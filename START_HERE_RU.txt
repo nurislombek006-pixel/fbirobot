@@ -1,0 +1,57 @@
+FRODROBOT V2 — САМЫЙ КОРОТКИЙ ЗАПУСК
+
+Тебе нужны 4 сайта/программы:
+1) @BotFather в Telegram — BOT_TOKEN
+2) Neon.tech — база данных
+3) GitHub.com — загрузить файлы проекта
+4) Render.com — запустить бот
+
+ШАГ 1. GITHUB
+- Открой github.com -> Sign up / Log in.
+- Справа сверху нажми + -> New repository.
+- Название: frodrobot.
+- Нажми Create repository.
+- Нажми "uploading an existing file" или Add file -> Upload files.
+- Перетащи ВСЕ файлы из папки frodrobot так, чтобы package.json лежал в корне репозитория.
+- Нажми Commit changes.
+
+ШАГ 2. NEON
+- Открой neon.tech -> Sign up.
+- Нажми New Project.
+- Можно оставить стандартные настройки -> Create Project.
+- Нажми Connect и скопируй строку подключения PostgreSQL.
+- Она начинается примерно так: postgresql://...
+- Это твой DATABASE_URL. Никому его не отправляй.
+
+ШАГ 3. RENDER
+- Открой render.com -> Sign up / Log in через GitHub.
+- Dashboard -> New + -> Web Service.
+- Выбери репозиторий frodrobot -> Connect.
+- Build Command: npm install
+- Start Command: npm start
+- Plan: Free для теста.
+- Найди Environment Variables и добавь:
+  BOT_TOKEN = токен от BotFather
+  OWNER_ID = твой Telegram ID
+  SECRET_TOKEN = придумай длинный пароль, например 30+ случайных символов
+  VIEWER_KEY = отдельный пароль для входа на веб-страницу
+  DATABASE_URL = строка из Neon
+  MAX_MESSAGES_PER_DIALOG = 3000
+  REPORT_MESSAGES = 1
+- Нажми Create Web Service / Deploy Web Service.
+- После запуска скопируй адрес вида https://frodrobot-xxxx.onrender.com
+
+ШАГ 4. WEBHOOK
+- В Windows открой папку проекта.
+- Правой кнопкой по set_webhook.ps1 -> Run with PowerShell.
+- Вставь BOT_TOKEN, адрес Render и SECRET_TOKEN по подсказкам.
+- Если в конце URL правильный и нет last_error_message — готово.
+
+ШАГ 5. ОТКРЫТЬ ЧАТЫ
+- Открой адрес Render в браузере.
+- Введи VIEWER_KEY.
+- Нажми "Открыть чаты".
+
+ВАЖНО
+- На бесплатном Render сервис может засыпать после простоя. Для теста это нормально.
+- Никому не показывай BOT_TOKEN, DATABASE_URL, SECRET_TOKEN и VIEWER_KEY.
